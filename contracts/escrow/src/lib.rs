@@ -1,3 +1,48 @@
+//! # Stellar Machina — Escrow contract
+//!
+//! On-chain escrow and settlement for **metered, pay-per-request usage** between
+//! autonomous agents and the APIs (services) they consume. Usage is counted
+//! off-chain for speed and reconciled here on Stellar, so that billing is
+//! transparent and every settlement is verifiable on the ledger.
+//!
+//! ## The model
+//!
+//! - **Services** are registered on-chain and priced either at a flat
+//!   per-request rate or with an ascending **tier** schedule.
+//! - **Agents** are the callers that accrue usage. Access can be constrained by
+//!   an allowlist/blocklist, per-call bounds, and a per-window rate limit.
+//! - **Usage counters** are per `(agent, service_id)` pair and are bumped by
+//!   [`Escrow::record_usage`]. They are kept small and cheap to update.
+//! - **Settlement** turns recorded usage into a charge: [`Escrow::compute_billing`]
+//!   quotes it, [`Escrow::settle`] drains a single pair, and
+//!   [`Escrow::settle_all`] drains every service for an agent (bounded by
+//!   [`MAX_SETTLE_ALL`]).
+//! - **Disputes** ([`Escrow::open_dispute`] / [`Escrow::resolve_dispute`]) gate
+//!   settlement for a contested pair until they are resolved.
+//! - **Administration** is guarded by a two-step admin handover
+//!   ([`Escrow::propose_admin_transfer`] → [`Escrow::accept_admin_transfer`])
+//!   and an emergency [`Escrow::pause`] / [`Escrow::unpause`] switch.
+//!
+//! ## Lifecycle at a glance
+//!
+//! `init` → `register_service` (+ pricing) → `record_usage` (repeatedly) →
+//! `settle` / `settle_all`. A dispute may interpose between usage and
+//! settlement; the storage schema is versioned and migrated via
+//! [`Escrow::migrate_v1_to_v2`].
+//!
+//! ## Errors
+//!
+//! All fallible entrypoints surface a typed [`EscrowError`]; each variant is
+//! documented with the exact condition that raises it.
+//!
+//! ## Further reading
+//!
+//! In-depth references live under `docs/escrow/`: `api.md` (full entrypoint
+//! reference), `pricing.md` (flat and tiered pricing), `disputes.md`,
+//! `storage.md` (on-chain layout), `arithmetic.md` (overflow/rounding rules),
+//! `validation-order.md`, `errors.md`, `security.md` (authorization), and
+//! `migrations.md` (schema versioning).
+
 #![no_std]
 
 use soroban_sdk::{
