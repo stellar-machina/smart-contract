@@ -203,12 +203,14 @@ fn test_record_usage_accumulates_across_calls() {
 
     let second = client.record_usage(&agent, &service_id, &60u32);
     assert_eq!(second.requests, 100);
-    assert_usage_event_count(&env, 2);
+    // `env.events().all()` exposes only the most recent invocation's events,
+    // so each call shows exactly one usage event rather than a running total.
+    assert_usage_event_count(&env, 1);
     assert_latest_usage_event(&env, &agent, &service_id, 60, 100);
 
     let third = client.record_usage(&agent, &service_id, &1u32);
     assert_eq!(third.requests, 101);
-    assert_usage_event_count(&env, 3);
+    assert_usage_event_count(&env, 1);
     assert_latest_usage_event(&env, &agent, &service_id, 1, 101);
 
     assert_eq!(client.get_usage(&agent, &service_id), 101);
@@ -299,17 +301,17 @@ fn test_record_usage_contract_exactly_one_event_per_call() {
     // No usage events yet.
     assert_usage_event_count(&env, 0);
 
-    // Single call produces exactly one event.
+    // Each call emits exactly one usage event. `env.events().all()` exposes
+    // only the most recent invocation's events, so the visible count is 1
+    // after every call rather than a cumulative total.
     client.record_usage(&agent, &svc, &1u32);
     assert_usage_event_count(&env, 1);
 
-    // Second call produces a second event (total count = 2).
     client.record_usage(&agent, &svc, &2u32);
-    assert_usage_event_count(&env, 2);
+    assert_usage_event_count(&env, 1);
 
-    // Third call produces a third event (total count = 3).
     client.record_usage(&agent, &svc, &3u32);
-    assert_usage_event_count(&env, 3);
+    assert_usage_event_count(&env, 1);
 }
 
 /// Lifetime counters advance by exactly the delta on each call.
@@ -988,11 +990,13 @@ fn test_record_usage_isolates_services_and_large_deltas() {
 
     let second = client.record_usage(&agent, &svc_b, &7u32);
     assert_eq!(second.requests, 7u32);
+    // Assert the emitted event before the read calls below: `env.events().all()`
+    // only reflects the most recent invocation, which the reads would replace.
+    assert_latest_usage_event(&env, &agent, &svc_b, 7, 7);
     assert_eq!(client.get_usage(&agent, &svc_a), 1_000_000_000u32);
     assert_eq!(client.get_usage(&agent, &svc_b), 7u32);
     assert_eq!(client.get_total_usage_by_agent(&agent), 1_000_000_007u32);
     assert_eq!(client.get_total_requests_all_time(), 1_000_000_007u64);
-    assert_latest_usage_event(&env, &agent, &svc_b, 7, 7);
 }
 
 #[test]
