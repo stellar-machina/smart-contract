@@ -46,6 +46,8 @@
 //! test.
 
 use super::*;
+use proptest::prop_assert_eq;
+use proptest::test_runner::TestRunner;
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger, MockAuth, MockAuthInvoke},
     Address, IntoVal, Symbol,
@@ -3227,4 +3229,85 @@ fn test_register_service_with_metadata_equivalent_to_separate_calls() {
         client2.is_service_registered(&service_id2)
     );
     assert_eq!(combined_meta, client2.get_service_metadata(&service_id2));
+}
+
+// ── Property-based tests (issue #3) ──────────────────────────────────────────
+//
+// These drive proptest's `TestRunner` to explore billing and settlement
+// invariants across randomized inputs, complementing the example-based tests
+// above. Inputs are bounded so `requests * price` stays well within `i128`,
+// which keeps the expected values exact (no saturation).
+
+/// Flat pricing: recorded usage is stored verbatim and the quote equals
+/// `requests * price` for every sampled `(requests, price)` pair.
+#[test]
+fn prop_flat_billing_equals_requests_times_price() {
+    let mut runner = TestRunner::default();
+    let inputs = (1u32..=1_000_000u32, 0i128..=1_000_000_000i128);
+    runner
+        .run(&inputs, |(requests, price)| {
+            let env = Env::default();
+            let (client, _admin) = setup_initialized(&env);
+            let agent = make_agent(&env);
+            let service = make_service(&env, "svc");
+            set_price(&client, &service, price);
+            record(&client, &agent, &service, requests);
+            prop_assert_eq!(client.get_usage(&agent, &service), requests);
+            prop_assert_eq!(
+                client.compute_billing(&agent, &service),
+                i128::from(requests) * price
+            );
+            Ok(())
+        })
+        .unwrap();
+}
+
+/// Accumulation: two successive `record_usage` calls sum into the counter, and
+/// the quote reflects the combined total.
+#[test]
+fn prop_usage_accumulates_across_calls() {
+    let mut runner = TestRunner::default();
+    let inputs = (1u32..=1_000_000u32, 1u32..=1_000_000u32, 0i128..=1_000_000_000i128);
+    runner
+        .run(&inputs, |(first, second, price)| {
+            let env = Env::default();
+            let (client, _admin) = setup_initialized(&env);
+            let agent = make_agent(&env);
+            let service = make_service(&env, "svc");
+            set_price(&client, &service, price);
+            record(&client, &agent, &service, first);
+            record(&client, &agent, &service, second);
+            let total = first + second;
+            prop_assert_eq!(client.get_usage(&agent, &service), total);
+            prop_assert_eq!(
+                client.compute_billing(&agent, &service),
+                i128::from(total) * price
+            );
+            Ok(())
+        })
+        .unwrap();
+}
+
+/// Settlement: `settle` returns exactly the pre-settle quote, then drains the
+/// counter to zero so a subsequent quote is `0`.
+#[test]
+fn prop_settle_matches_quote_and_drains() {
+    let mut runner = TestRunner::default();
+    let inputs = (1u32..=1_000_000u32, 0i128..=1_000_000_000i128);
+    runner
+        .run(&inputs, |(requests, price)| {
+            let env = Env::default();
+            let (client, _admin) = setup_initialized(&env);
+            let agent = make_agent(&env);
+            let service = make_service(&env, "svc");
+            set_price(&client, &service, price);
+            record(&client, &agent, &service, requests);
+            let quote = client.compute_billing(&agent, &service);
+            let billed = client.settle(&agent, &service);
+            prop_assert_eq!(billed, quote);
+            prop_assert_eq!(client.get_usage(&agent, &service), 0u32);
+            prop_assert_eq!(client.compute_billing(&agent, &service), 0i128);
+            Ok(())
+        })
+        .unwrap();
 }
