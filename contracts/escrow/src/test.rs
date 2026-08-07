@@ -3267,7 +3267,11 @@ fn prop_flat_billing_equals_requests_times_price() {
 #[test]
 fn prop_usage_accumulates_across_calls() {
     let mut runner = TestRunner::default();
-    let inputs = (1u32..=1_000_000u32, 1u32..=1_000_000u32, 0i128..=1_000_000_000i128);
+    let inputs = (
+        1u32..=1_000_000u32,
+        1u32..=1_000_000u32,
+        0i128..=1_000_000_000i128,
+    );
     runner
         .run(&inputs, |(first, second, price)| {
             let env = Env::default();
