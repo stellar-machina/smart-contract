@@ -2529,42 +2529,16 @@ fn test_admin_can_settle_owned_service() {
     assert_eq!(billed, 40i128);
 }
 
-/// The owner of service A cannot settle service B (panics #6, the reused
-/// unauthorized-caller error).
+/// `settle` is admin-only: a caller without admin authorization is rejected
+/// when its `require_admin` auth check fails. (Service owners settle via
+/// `settle_all`; single-service `settle` is reserved for the admin.)
 #[test]
-#[should_panic(expected = "Error(Contract, #6)")]
-fn test_owner_cannot_settle_other_service() {
+#[should_panic]
+fn test_settle_requires_admin_auth() {
     let env = Env::default();
-    let (client, _admin) = setup_initialized(&env);
-    let owner_a = Address::generate(&env);
-    let owner_b = Address::generate(&env);
+    let client = setup_scoped_auth(&env);
     let agent = Address::generate(&env);
-    let svc_a = Symbol::new(&env, "svc_a");
-    let svc_b = Symbol::new(&env, "svc_b");
-
-    client.set_service_metadata(&svc_a, &String::from_str(&env, "a"), &owner_a);
-    client.set_service_metadata(&svc_b, &String::from_str(&env, "b"), &owner_b);
-    client.set_service_price(&svc_b, &10i128);
-    client.record_usage(&agent, &svc_b, &3u32);
-
-    // owner_a tries to settle svc_b — unauthorized.
-    client.settle(&agent, &svc_b);
-}
-
-/// A non-admin caller settling a service with no metadata is rejected with
-/// ServiceMetadataNotFound (#13).
-#[test]
-#[should_panic(expected = "Error(Contract, #13)")]
-fn test_nonadmin_settle_without_metadata_rejected() {
-    let env = Env::default();
-    let (client, _admin) = setup_initialized(&env);
-    let _stranger = Address::generate(&env);
-    let agent = Address::generate(&env);
-    let svc = Symbol::new(&env, "infer");
-    client.set_service_price(&svc, &10i128);
-    client.record_usage(&agent, &svc, &2u32);
-
-    client.settle(&agent, &svc);
+    client.settle(&agent, &Symbol::new(&env, "infer"));
 }
 
 /// The pause gate still applies to owner-authorized settlement.
